@@ -1,0 +1,18 @@
+package backend.repository;
+
+import backend.entity.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface UserRepository extends JpaRepository<User, Long> {
+
+    Optional<User> findByEmail(String email);
+
+    Optional<User> findByPhone(String phone);
+
+    default Optional<User> findByEmailOrPhone(String identifier) {
+        return findByEmail(identifier)
+                .or(() -> findByPhone(identifier));
+    }
+}
