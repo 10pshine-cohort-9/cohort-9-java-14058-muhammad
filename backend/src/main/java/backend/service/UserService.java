@@ -3,6 +3,7 @@ package backend.service;
 import backend.dto.ChangePasswordRequest;
 import backend.dto.LoginRequest;
 import backend.dto.RegisterRequest;
+import backend.dto.UserResponse;
 import backend.entity.User;
 import backend.exception.BadRequestException;
 import backend.exception.ConflictException;
@@ -15,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import backend.security.AuthUtil;
+import backend.security.TokenInvalidationRegistry;
 
 
 @Service
@@ -28,22 +30,26 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final AuthUtil authUtil;
+    private final TokenInvalidationRegistry tokenInvalidationRegistry;
 
     // ================= REGISTER =================
 
     public User register(RegisterRequest request) {
 
-        if (request.getEmail() == null && request.getPhone() == null) {
+        String email = normalizeBlank(request.getEmail());
+        String phone = normalizeBlank(request.getPhone());
+
+        if (email == null && phone == null) {
             throw new BadRequestException("Email or phone is required");
         }
 
-        if (request.getEmail() != null &&
-                userRepository.findByEmail(request.getEmail()).isPresent()) {
+        if (email != null &&
+                userRepository.findByEmail(email).isPresent()) {
             throw new ConflictException("Email already registered");
         }
 
-        if (request.getPhone() != null &&
-                userRepository.findByPhone(request.getPhone()).isPresent()) {
+        if (phone != null &&
+                userRepository.findByPhone(phone).isPresent()) {
             throw new ConflictException("Phone already registered");
         }
 
@@ -51,16 +57,18 @@ public class UserService {
 
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());
-        user.setEmail(request.getEmail());
-        user.setPhone(request.getPhone());
+        user.setEmail(email);
+        user.setPhone(phone);
         user.setPassword(passwordEncoder.encode(request.getPassword()));
 
         logger.info("New user registered: {}",
-                request.getEmail() != null
-                        ? request.getEmail()
-                        : request.getPhone());
+                email != null ? email : phone);
 
         return userRepository.save(user);
+    }
+
+    private String normalizeBlank(String value) {
+        return (value == null || value.isBlank()) ? null : value;
     }
 
     // ================= LOGIN =================
@@ -82,12 +90,37 @@ public class UserService {
         logger.info("User logged in: {}",
         request.getEmailOrPhone());
 
-        return jwtUtil.generateToken(user.getId().toString());
+        int tokenVersion = tokenInvalidationRegistry.getCurrentVersion(user.getId());
+
+        return jwtUtil.generateToken(user.getId().toString(), tokenVersion);
      }
+
+    // ================= CURRENT USER =================
+
+    public UserResponse getCurrentUserProfile() {
+
+        User user = authUtil.getCurrentUser();
+
+        return new UserResponse(
+            user.getId(),
+            user.getFirstName(),
+            user.getLastName(),
+            user.getEmail(),
+            user.getPhone()
+       );
+    }
+
 
     // ================= CHANGE PASSWORD =================
 
-    public void changePassword(ChangePasswordRequest request) {
+    /**
+     * Changes the password and invalidates every token issued before now,
+     * so a stolen/old session cookie stops working. A fresh token is
+     * generated and returned so the caller's own current session -- the one
+     * making this very request -- keeps working without being logged out
+     * by its own password change.
+     */
+    public String changePassword(ChangePasswordRequest request) {
 
          User user = authUtil.getCurrentUser();
 
@@ -106,7 +139,12 @@ public class UserService {
 
         userRepository.save(user);
 
+        int newVersion = tokenInvalidationRegistry.incrementVersion(user.getId());
+        String newToken = jwtUtil.generateToken(user.getId().toString(), newVersion);
+
            logger.info("Password changed successfully for user id={}",
             user.getId());
-    }  
+
+        return newToken;
+    }
 }

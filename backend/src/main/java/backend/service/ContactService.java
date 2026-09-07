@@ -78,9 +78,13 @@ public class ContactService {
 
     // ================= GET ALL CONTACTS =================
 
-    public Page<Contact> getContacts(Pageable pageable) {
+    public Page<Contact> getContacts(Pageable pageable, boolean favoritesOnly) {
 
         User user = authUtil.getCurrentUser();
+
+        if (favoritesOnly) {
+            return contactRepository.findByUserIdAndFavoriteTrue(user.getId(), pageable);
+        }
 
         return contactRepository.findByUserId(user.getId(), pageable);
     }
@@ -158,6 +162,23 @@ public class ContactService {
         logger.info("Contact updated: id={} by user={}",
                 id,
                 user.getEmail());
+
+        return updated;
+    }
+
+    // ================= TOGGLE FAVORITE =================
+
+    public Contact toggleFavorite(Long id) {
+
+        Contact contact = getContactById(id);
+
+        contact.setFavorite(!contact.isFavorite());
+
+        Contact updated = contactRepository.save(contact);
+
+        logger.info("Contact favorite toggled: id={} favorite={}",
+                id,
+                updated.isFavorite());
 
         return updated;
     }

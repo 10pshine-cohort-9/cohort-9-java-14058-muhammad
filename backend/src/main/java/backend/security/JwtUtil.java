@@ -1,5 +1,6 @@
 package backend.security;
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
@@ -14,38 +15,55 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
+    private static final String VERSION_CLAIM = "tokenVersion";
+
     @Value("${jwt.secret}")
     private String secret;
 
     private SecretKey key;
 
-    private static final long EXPIRATION_TIME = 10L * 60 * 60 * 1000; // 10 hours
+    private static final long EXPIRATION_TIME = 10L * 60 * 60 * 1000;
 
     @PostConstruct
     public void init() {
-        key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        key = Keys.hmacShaKeyFor(
+                secret.getBytes(StandardCharsets.UTF_8)
+        );
     }
 
-    public String generateToken(String subject) {
+    public String generateToken(String subject, int tokenVersion) {
 
         Instant now = Instant.now();
-        Instant expiration = now.plusMillis(EXPIRATION_TIME);
+
+        Date issuedAt = Date.from(now);
+        Date expiration = Date.from(
+                now.plusMillis(EXPIRATION_TIME)
+        );
 
         return Jwts.builder()
                 .subject(subject)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(expiration))
+                .claim(VERSION_CLAIM, tokenVersion)
+                .issuedAt(issuedAt)
+                .expiration(expiration)
                 .signWith(key)
                 .compact();
     }
 
-    public String extractSubject(String token) {
+    private Claims parseClaims(String token) {
         return Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
-                .getPayload()
-                .getSubject();
+                .getPayload();
+    }
+
+    public String extractSubject(String token) {
+        return parseClaims(token).getSubject();
+    }
+
+    public int extractTokenVersion(String token) {
+        Object version = parseClaims(token).get(VERSION_CLAIM);
+        return version == null ? 0 : ((Number) version).intValue();
     }
 
     public boolean isTokenValid(String token) {
